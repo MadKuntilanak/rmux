@@ -2,26 +2,28 @@ local Config = require "rmux.config"
 local Constant = require "rmux.constant"
 local Picker = require "rmux.picker"
 local Util = require "rmux.utils"
+local tmpl = require "rmux.templates"
 
 local M = {}
 
+-- true  -> fall back to overseer (no backend detected, or no valid tasks.json)
+-- false -> run tasks in multiplexer panes (tasks.json loaded and backend available)
 local use_default_overseer = true
+
+-- why overseer is used; shown by the board
+local overseer_reason = "No .vscode/tasks.json in this project."
 
 local Integs
 
 local function setup_integs()
-  if Integs then
-    return Integs
+  if not Integs then
+    Integs = require "rmux.integrations"
   end
-
-  Integs = require "rmux.integrations"
   return Integs
 end
 
 ---@param is_select_file? boolean
 local edit_config = function(is_select_file)
-  is_select_file = is_select_file or false
-
   if is_select_file then
     Picker.select_and_load_filerc()
     return
@@ -29,13 +31,13 @@ local edit_config = function(is_select_file)
 
   local file_rc = Constant.get_file_rc()
 
-  if not Util.exists(file_rc) then
-    local run_with = Constant.get_run_with()
-    Util.warn("Provider '" .. run_with .. "' is used, but RC file '" .. file_rc .. "' was not found")
+  if not file_rc or not Util.exists(file_rc) then
+    local provider = Constant.get_backend() or "overseer"
+    Util.warn("Provider '" .. provider .. "' is used, but RC file '" .. tostring(file_rc) .. "' was not found")
     return
   end
 
-  vim.cmd("vsp " .. file_rc)
+  vim.cmd("vsp " .. vim.fn.fnameescape(file_rc))
   vim.cmd "wincmd ="
 end
 
@@ -84,12 +86,20 @@ local call_ = {
     Util.info(vim.inspect(Constant.get_settings()))
   end,
 
+  board = function()
+    require("rmux.board").toggle(setup_integs(), {
+      default_overseer = use_default_overseer,
+      reason = overseer_reason,
+    })
+  end,
+
+  -- TODO: the message says "default provider" but the condition fires when the
+  -- default provider is NOT used. Decide which one is intended.
   target_pane = function()
-    if not use_default_overseer then
+    if use_default_overseer then
       Util.warn "Cannot process, currently using the default provider (overseer)"
       return
     end
-
     setup_integs():select_target_panes()
   end,
 
@@ -110,91 +120,95 @@ local call_ = {
   end,
 }
 
--- Run only once
-local has_shown_notification = false
-
----@param provider RmuxRunWith
-local function notification_popup(provider)
-  Util.info("Using the default provider: " .. provider)
-end
-
----@param provider string
-local function show_notification_once(provider)
-  if not has_shown_notification and Config.settings.setnotif then
-    has_shown_notification = true
-    notification_popup(provider)
-  end
-end
-
 --  ╭──────────────────────────────────────────────────────────╮
 --  │                     FACTORY COMMAND                      │
 --  ╰──────────────────────────────────────────────────────────╯
 
-local tmpl = require "rmux.templates"
+local has_shown_notification = false
 
----@param Settings RmuxDefaultsConfig
-local function setup_run_with(Settings)
-  local run_with = Settings.run_with
-  if run_with == "auto" then
-    local wezterm = Util.get_env "WEZTERM_EXECUTABLE"
-    if wezterm then
-      run_with = "wez"
-    end
-
-    local tmux = Util.get_env "TMUX"
-    if tmux then
-      run_with = "mux"
-    end
-  end
-  Settings.run_with = run_with
-end
-
----@param state_cmd string
----@param is_dont_set_rc boolean?
-function M.command(state_cmd, is_dont_set_rc)
-  local taskrc = tmpl:register()
-  is_dont_set_rc = is_dont_set_rc or false
-
-  local vscode = require "rmux.templates.vscode"
-  taskrc:set_template { vscode }
-
-  if is_dont_set_rc then
-    local strip_filerc_path = { ".vscode", "tasks.json" }
-    local file_rc = table.concat(strip_filerc_path, "/")
-    tmpl:is_file_rc_exists(file_rc, strip_filerc_path)
-    call_[state_cmd]()
+---@param provider string
+local function show_notification_once(provider)
+  if has_shown_notification or not Config.settings.setnotif then
     return
   end
+  has_shown_notification = true
+  Util.info("Using provider: " .. provider)
+end
 
-  if taskrc:is_load() then
-    use_default_overseer = false
-  else
-    use_default_overseer = true
+---@class RmuxCommandOpts
+---@field load_rc? boolean  load .vscode/tasks.json before running (default true)
+---@field create_rc? boolean create .vscode/tasks.json from the default template when missing (default false)
+
+--- Returns `true`, or `false, err` on expected failure.
+--- Unhandled errors bubble up to `M.command`.
+---@param state_cmd string
+---@param opts RmuxCommandOpts
+---@return boolean ok, string|nil err
+local function run_command(state_cmd, opts)
+  local handler = call_[state_cmd]
+  if not handler then
+    return false, ("unknown command: %s"):format(tostring(state_cmd))
   end
 
-  setup_run_with(Config.settings)
-  show_notification_once(Config.settings.run_with)
+  -- nil when run_with = "auto" and nvim isn't inside tmux or herdr
+  local backend, no_backend_reason = Constant.get_backend()
 
-  local function _cmd()
-    local cmd
-    for _, provider_cmd in pairs(Config.settings.cmd_provider) do
-      if state_cmd == provider_cmd then
-        cmd = provider_cmd
-      end
+  local taskrc = tmpl:register()
+  taskrc:set_template { require "rmux.templates.vscode" }
+
+  if opts.create_rc then
+    local path, created = taskrc:ensure_rc(vim.fn.getcwd())
+    if not path then
+      return false, created -- holds the error message when path is nil
     end
-    return cmd
+    if created then
+      Util.info("Created " .. path)
+      vim.cmd("vsp " .. vim.fn.fnameescape(path))
+    end
   end
 
-  local call = call_[_cmd()]
+  if opts.load_rc ~= false then
+    -- Load rc even without a backend (cached by mtime) so edit/select commands
+    -- still locate the file, while execution falls back to overseer.
+    local loaded, err = taskrc:is_load()
+    if err then
+      Util.warn(err) -- warn once before falling back to overseer
+    end
 
-  -- Prevent the user from editing or updating the current buffer temporarily by
-  -- disabling user input and entering command-line mode.
-  vim.api.nvim_input "<Cmd>"
+    use_default_overseer = not loaded or backend == nil
+    if backend == nil and no_backend_reason then
+      overseer_reason = no_backend_reason
+    else
+      overseer_reason = err or "No .vscode/tasks.json in this project."
+    end
+  end
 
-  call()
+  show_notification_once(backend or "overseer")
 
-  -- Return to normal mode after the command is finished
-  vim.api.nvim_input "<Esc>"
+  handler()
+  return true
+end
+
+---@param e any
+---@return string
+local function on_error(e)
+  if Config.settings.debug then
+    return debug.traceback(tostring(e), 2)
+  end
+  return tostring(e)
+end
+
+--- Entry point for running commands; catches and surfaces all errors as notifications.
+---@param state_cmd string
+---@param opts? RmuxCommandOpts
+function M.command(state_cmd, opts)
+  local ok, success, err = xpcall(run_command, on_error, state_cmd, opts or {})
+
+  if not ok then
+    Util.error(success)
+  elseif not success then
+    Util.warn(err)
+  end
 end
 
 return M

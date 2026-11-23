@@ -1,5 +1,5 @@
 ---@alias RmuxProviders "vscode"
----@alias RmuxRunWith "mux" | "wez" | "auto"
+---@alias RmuxRunWith "tmux" | "wez" | "herdr" | "auto"
 
 ---@alias RmuxTypeStrategy "shell" | "process"  | "orchestrator" | "sequential" | "close_all"
 
@@ -30,6 +30,26 @@
 ---@field SHOW_CONFIG string
 ---@field SELECT_FILERC string
 
+---@alias RmuxBoardTypeKey  string | string[] | boolean
+
+---@class BoardKeys
+---@field focus RmuxBoardTypeKey
+---@field run RmuxBoardTypeKey
+---@field stop RmuxBoardTypeKey
+---@field forget RmuxBoardTypeKey
+---@field watch RmuxBoardTypeKey
+---@field unwatch RmuxBoardTypeKey
+---@field error RmuxBoardTypeKey
+---@field all RmuxBoardTypeKey
+---@field select_pane RmuxBoardTypeKey
+---@field overseer RmuxBoardTypeKey
+---@field toggle_group RmuxBoardTypeKey
+---@field close RmuxBoardTypeKey
+---@field help RmuxBoardTypeKey
+
+---@class RmuxBoardConfig
+---@field keymaps BoardKeys
+
 ---@class RmuxDefaultsConfig
 ---@field setnotif boolean
 ---@field run_with RmuxRunWith
@@ -37,6 +57,8 @@
 ---@field sendID? string
 ---@field rmuxdirrc? string
 ---@field file_rc? string
+---@field debug? boolean
+---@field board RmuxBoardConfig
 ---@field load_tasks? table
 ---@field active_tasks? table
 ---@field cmd_provider? RmuxProviderCmd

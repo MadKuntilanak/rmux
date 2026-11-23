@@ -112,10 +112,10 @@ function M.select_pane(Integs, opts)
 end
 
 ---@param Integs table
----@param opts table
+---@param contents table
 ---@param title string
 ---@param is_overseer? boolean
-function M.gen_select(Integs, opts, title, is_overseer)
+function M.gen_select(Integs, contents, title, is_overseer)
   is_overseer = is_overseer or false
 
   local fzflua, _, _ = setup_fzf()
@@ -123,11 +123,16 @@ function M.gen_select(Integs, opts, title, is_overseer)
     return
   end
 
+  -- local height = #contents * 0.1 - 0.4
+  -- if #contents == 1 then
+  --   height = height + 0.5
+  -- end
+
   local title_str = title:gsub("^%l", string.upper)
   fzfopts.winopts = vim.tbl_deep_extend("force", fzfopts_winopts, {
     title = format_title(title_str, "󰑮"),
-    width = 0.70,
-    height = #opts + 4,
+    width = 0.50,
+    height = 0.50,
     col = 0.50,
     row = 0.50,
     fullscreen = false,
@@ -151,7 +156,7 @@ function M.gen_select(Integs, opts, title, is_overseer)
     ["ctrl-w"] = UtilFzfMapping.overseer_watch(Integs, is_overseer),
   }
 
-  fzflua.fzf_exec(opts, fzfopts)
+  fzflua.fzf_exec(contents, fzfopts)
 end
 
 function M.grep_err(Integs, opts, is_overseer)

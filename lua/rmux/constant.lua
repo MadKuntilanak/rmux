@@ -20,14 +20,13 @@ function M.get_sendID()
   return Config.settings.sendID
 end
 
----@param run_with "mux" | "wez"
+---@param run_with RmuxRunWith
 function M.set_run_with(run_with)
   Config.settings.run_with = run_with
 end
 
 function M.get_run_with()
-  local base = M.get_settings()
-  return base.run_with
+  return M.get_backend() or M.get_settings().run_with
 end
 
 ---@param tbl_tasks any
@@ -148,15 +147,70 @@ function M.open_loc()
   return base.quickfix.lopen
 end
 
----------------------
-function M.find_state_cmd_on_tbl_opened_panes(state_cmd)
-  -- assert(#Config.settings.base.active_tasks > 0, "get_active_tasks must greater than zero")
-  local active_tasks = M.get_active_tasks()
-  for _, value in pairs(active_tasks) do
-    if value.state_cmd == state_cmd then
-      return value
+-- function M.find_state_cmd_on_tbl_opened_panes(state_cmd)
+--   local active_tasks = M.get_active_tasks()
+--   for _, value in pairs(active_tasks) do
+--     if value.state_cmd == state_cmd then
+--       return value
+--     end
+--   end
+-- end
+
+--  ╭──────────────────────────────────────────────────────────╮
+--  │                         BACKEND                          │
+--  ╰──────────────────────────────────────────────────────────╯
+
+-- Check innermost multiplexer first. herdr strips outer $TMUX/$WEZTERM vars,
+-- while a tmux session inside herdr sets its own $TMUX.
+local BACKENDS = {
+  {
+    name = "tmux",
+    is_active = function()
+      return (vim.env.TMUX or "") ~= ""
+    end,
+  },
+  {
+    name = "herdr",
+    is_active = function()
+      return vim.env.HERDR_ENV == "1"
+    end,
+  },
+  {
+    name = "wez",
+    is_active = function()
+      return (vim.env.WEZTERM_EXECUTABLE or "") ~= ""
+    end,
+  },
+}
+
+---@type table<string, boolean>
+local available = {}
+
+---@param name string
+---@return boolean
+local function has_module(name)
+  if available[name] == nil then
+    local dir = ("lua/rmux/integrations/%s/init.lua"):format(name)
+    local file = ("lua/rmux/integrations/%s.lua"):format(name)
+    available[name] = #vim.api.nvim_get_runtime_file(dir, false) > 0 or #vim.api.nvim_get_runtime_file(file, false) > 0
+  end
+  return available[name]
+end
+
+---@return string|nil backend, string|nil reason
+function M.get_backend()
+  local configured = Config.settings.run_with
+  if configured and configured ~= "auto" then
+    return configured
+  end
+
+  for _, backend in ipairs(BACKENDS) do
+    if backend.is_active() and has_module(backend.name) then
+      return backend.name
     end
   end
+
+  return nil, "No terminal multiplexer detected (tmux / herdr)"
 end
 
 return M

@@ -3,11 +3,31 @@ local M = {}
 ---@type RmuxDefaultsConfig
 M.settings = {
   rmuxdirrc = vim.fn.stdpath "cache" .. "/runmux",
-  run_with = "auto", -- "tmux, wez, auto"
+  run_with = "auto", -- "tmux, wez, herdr, auto"
   setnotif = true,
+  debug = false,
   quickfix = {
     copen = "belowright copen",
     lopen = "belowright lopen",
+  },
+  board = {
+    keymaps = {
+      -- Use `false` to disable it.
+      focus = "f",
+      run = "<CR>",
+      stop = "s",
+      kill = { "x", "K" },
+      forget = "D",
+      watch = "w",
+      unwatch = "W",
+      error = "e",
+      all = "a",
+      select_pane = "p",
+      overseer = "o",
+      toggle_group = "<Tab>",
+      close = { "q", "<Esc>" },
+      help = { "?", "g?" },
+    },
   },
 }
 
